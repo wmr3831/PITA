@@ -1,0 +1,7 @@
+# CRAN packages
+tidyverse
+brms
+# GitHub packages
+user/repo
+# Pinned version
+cli@3.6.4
