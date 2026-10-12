@@ -13,3 +13,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       curl ca-certificates git sudo build-essential && \
     rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /root/.positron-server/positron-server-${POSITRON_VERSION} && \
+    curl -fSL --retry 5 --retry-delay 3 -o /tmp/positron-server.tar.gz \
+      https://cdn.posit.co/positron/releases/reh/x86_64/positron-reh-linux-x64-${POSITRON_VERSION}.tar.gz && \
+    tar -xzf /tmp/positron-server.tar.gz \
+      -C /root/.positron-server/positron-server-${POSITRON_VERSION} --strip-components=1 && \
+    rm /tmp/positron-server.tar.gz
