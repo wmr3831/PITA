@@ -2,6 +2,8 @@ FROM ghcr.io/r-lib/rig/debian-13-release:latest
 
 USER root
 
+ARG POSITRON_VERSION=2026.10.0-297
+
 # Remove the base image's rig apt repo (fails signature checks on Debian 13)
 RUN rm -f $(grep -rl 'rig.r-pkg.org' /etc/apt/sources.list.d 2>/dev/null) ; \
     sed -i '/rig\.r-pkg\.org/d' /etc/apt/sources.list 2>/dev/null || true
