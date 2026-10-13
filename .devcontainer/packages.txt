@@ -1,7 +1,13 @@
-# CRAN packages
-tidyverse
-brms
-# GitHub packages
-user/repo
-# Pinned version
-cli@3.6.4
+lavaan@0.7-3
+power4mome@0.2.1
+broom@1.0.13
+rempsyc@0.2.0
+tidyverse@2.0.0
+flextable@0.10.1
+ggsem@1.0.0.1
+ggdag@0.2.13
+DT@0.34.0
+DiagrammeR@1.0.12
+svglite@2.2.2
+colourpicker@1.3.0
+shinyjs@2.1.1
