@@ -1,0 +1,529 @@
+---
+title: "Model_Design"
+output: html_document
+---
+
+# Setup R environment
+
+```{r setup}
+# load libraries
+library(lavaan)
+library(ggsem)
+library(ggdag)
+library(tidyverse)
+
+```
+
+# Define model structures
+```{r models}
+
+
+# define H1 Model
+full_mod1 <- "
+  # Latent variables
+    PID =~ DIST + CONT + SEST + SEFF
+    PIT =~ DIST_THRT + CONT_THRT + SEST_THRT + SEFF_THRT
+  # Regressions
+    DISP ~ PID
+    PIT ~ PID
+    YVAR ~ PID + DISP + PIT
+  # Covariances
+    DISP ~~ PIT
+    DIST ~~ CONT + SEST + SEFF
+    CONT ~~ SEST + SEFF
+    SEST ~~ SEFF
+    DIST_THRT ~~ CONT_THRT + SEST_THRT + SEFF_THRT
+    CONT_THRT ~~ SEST_THRT + SEFF_THRT
+    SEST_THRT ~~ SEFF_THRT
+"
+
+# define moderation model
+full_mod_mod <- "
+    VAR_T2 ~ VAR_T1 + PLC_NAR + VAR_T1:PLC_NAR + COV
+    "
+
+# define H2 Model
+full_mod2 <- "
+  # Latent variables
+    PID =~ DIST + CONT + SEST + SEFF
+    PIT_T1 =~ DIST_THRT_T1 + CONT_THRT_T1 + SEST_THRT_T1 + SEFF_THRT_T1
+    PIT_T2 =~ DIST_THRT_T2 + CONT_THRT_T2 + SEST_THRT_T2 + SEFF_THRT_T2
+  # Regressions
+    PIT_T1 ~ PID
+    DISP_T1 ~ PID
+    YVAR_T1 ~ PID + PIT_T1 + DISP_T1
+    PIT_T2 ~ PIT_T1
+    DISP_T2 ~ DISP_T1
+    YVAR_T2 ~ YVAR_T1 + PIT_T2 + DISP_T2
+  # Covariances
+    PIT_T1 ~~ DISP_T1
+    PIT_T2 ~~ DISP_T2
+    DIST ~~ CONT + SEST + SEFF
+    CONT ~~ SEST + SEFF
+    SEST ~~ SEFF
+    DIST_THRT_T1 ~~ CONT_THRT_T1 + SEST_THRT_T1 + SEFF_THRT_T1
+    CONT_THRT_T1 ~~ SEST_THRT_T1 + SEFF_THRT_T1
+    SEST_THRT_T1 ~~ SEFF_THRT_T1
+    DIST_THRT_T2 ~~ CONT_THRT_T2 + SEST_THRT_T2 + SEFF_THRT_T2
+    CONT_THRT_T2 ~~ SEST_THRT_T2 + SEFF_THRT_T2
+    SEST_THRT_T2 ~~ SEFF_THRT_T2
+"
+
+
+```
+
+# Plot DAGs for all models
+```{r dags}
+
+
+# create DAG for first model
+mod1_dag <- dagify(
+  OUT ~ PID + PIT + DISP,
+  PIT ~ PID,
+  DISP ~ PID,
+  exposure = "PID",
+  outcome = "OUT",
+  coords = list(
+    x = c(PID = -0.5, PIT = 1, DISP = 1, OUT = 2.5),   # exposure left, mediators middle, outcome right
+    y = c(PID = 0, PIT = 1, DISP = -1, OUT = 0)
+  )
+)
+
+# convert first model DAG to tidy format
+mod1_d <- tidy_dagitty(mod_dag)
+
+# extract DAG nodes, filter for latent and observed variables
+mod1_nodes <- mod1_d %>% as_tibble() %>% distinct(name, x, y)
+mod1_rect_nodes   <- filter(mod1_nodes, name %in% c("DISP", "OUT"))
+mod1_circle_nodes <- filter(mod1_nodes, name %in% c("PID", "PIT"))
+
+
+# fenerate model one DAG using ggplot rendering based on nodes and edges extracted from tidy dag
+ggplot(mod1_d, aes(x = x, y = y, xend = xend, yend = yend)) +
+  # plot edges
+  geom_dag_edges(
+    start_cap = ggraph::circle(11, "mm"),
+    end_cap   = ggraph::circle(11, "mm")
+  ) +
+  # pink circles
+  geom_point(
+    data = mod1_circle_nodes, aes(x = x, y = y), inherit.aes = FALSE,
+    shape = 21, size = 22, fill = "#F4A6C8", color = "#C2185B", stroke = 1
+  ) +
+  # add labels
+  geom_text(
+    data = mod1_circle_nodes, aes(x = x, y = y, label = name), inherit.aes = FALSE
+  ) +
+  # nlue rectangles
+  geom_label(
+    data = mod1_rect_nodes, aes(x = x, y = y, label = name), inherit.aes = FALSE,
+    fill = "#6BAED6", color = "black", label.r = unit(0, "pt"),
+    label.padding = unit(0.6, "lines"), size = 5
+  ) +
+  coord_cartesian(xlim = c(-0.5, 2.5), ylim = c(-1.5, 1.5)) +
+  theme_dag()
+
+# define coordinates for moderation DAG because dagify cannot define edges connected to other edges
+# an easier solution might be to use dagify and create a point between the X and Y vars but just not
+# render that point in ggplot
+nodes <- tribble(
+  ~name,      ~x,    ~y,
+  "EXP_T1",   -0.5,   0,
+  "EXP_T2",    2.5,   0,
+  "PLC_NAR",   1,     1.3,
+  "COV",       2,    -1.3
+)
+
+# define square vs circle nodes
+square_nodes <- nodes %>% filter(name != "COV")
+circle_nodes <- nodes %>% filter(name == "COV")
+
+# function to shorten a segment so arrows stop at the node edges
+shrink <- function(df, s_start = 0.22, s_end = 0.22) {
+  df %>%
+    mutate(
+      len = sqrt((xend - x)^2 + (yend - y)^2),
+      ux = (xend - x) / len,
+      uy = (yend - y) / len,
+      x_new = x + ux * s_start,
+      y_new = y + uy * s_start,
+      xend_new = xend - ux * s_end,
+      yend_new = yend - uy * s_end
+    ) %>%
+    transmute(x = x_new, y = y_new, xend = xend_new, yend = yend_new)
+}
+
+# compute edges and shrink them to fit nodes
+edges <- bind_rows(
+  # focal path: EXP_T1 -> EXP_T2
+  tibble(x = -0.5, y = 0, xend = 2.5, yend = 0)   %>% shrink(),
+  # covariate: COV -> EXP_T2
+  tibble(x = 2, y = -1.3, xend = 2.5, yend = 0)   %>% shrink()
+)
+
+# moderation arrow: PLC_NAR -> midpoint of the EXP_T1 -> EXP_T2 path
+mod_edge <- tibble(x = 1, y = 1.3, xend = 1, yend = 0) %>% shrink(s_start = 0.22, s_end = 0)
+
+arrow_style <- arrow(length = unit(3, "mm"), type = "closed")
+
+# plot moderation model
+ggplot() +
+  # add normal dag edges
+  geom_segment(data = edges, aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow_style, linewidth = 0.7) +
+  # add moderation arrow
+  geom_segment(data = mod_edge, aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow_style, linewidth = 0.7) +
+  # add blue squares
+  geom_point(data = square_nodes, aes(x = x, y = y),
+             shape = 22, size = 26, fill = "#6BAED6", color = "black", stroke = 0.8) +
+  # add pink circle
+  geom_point(data = circle_nodes, aes(x = x, y = y),
+             shape = 21, size = 26, fill = "#F4A6C8", color = "black", stroke = 0.8) +
+  geom_text(data = nodes, aes(x = x, y = y, label = name), size = 3.5) +
+  coord_fixed(xlim = c(-1, 3), ylim = c(-1.8, 1.8)) +
+  theme_void()
+
+# generate DAG for model two
+mod2_dag <- dagify(
+  OUT_T2 ~ OUT_T1 + PIT_T2 + DISP_T2,
+  PIT_T2 ~ PIT_T1,
+  DISP_T2 ~ DISP_T1,
+  OUT_T1 ~ PID + PIT_T1 + DISP_T1,
+  PIT_T1 ~ PID,
+  DISP_T1 ~ PID,
+  exposure = "PID",
+  outcome = "OUT_T2",
+  coords = list(
+    x = c(PID = 0, PIT_T1 = 1, DISP_T1 = 1, OUT_T1 = 2,
+          PIT_T2 = 3, DISP_T2 = 3, OUT_T2 = 4),
+    y = c(PID = 0, PIT_T1 = 1, DISP_T1 = -1, OUT_T1 = 0,
+          PIT_T2 = 1, DISP_T2 = -1, OUT_T2 = 0)
+  )
+)
+
+# convert dag to tidy data
+mod2_d <- tidy_dagitty(mod2_dag)
+
+# define dage shape sizes
+r  <- 0.32   # circle radius
+hw <- 0.40   # rectangle half-width
+hh <- 0.22   # rectangle half-height
+
+# identify latent variables
+circle_names <- c("PID", "PIT_T1", "PIT_T2")
+
+# extrace nodes for model 2 DAG
+mod2_nodes <- mod2_d %>%
+  as_tibble() %>%
+  distinct(name, x, y) %>%
+  mutate(shape = if_else(name %in% circle_names, "circle", "rect"))
+
+mod2_circle_nodes <- mod2_nodes %>% filter(shape == "circle")
+mod2_rect_nodes   <- mod2_nodes %>% filter(shape == "rect")
+
+# Cacluate polygon structure for circle nodes
+circle_poly <- mod2_circle_nodes %>%
+  crossing(t = seq(0, 2 * pi, length.out = 100)) %>%
+  mutate(px = x + r * cos(t), py = y + r * sin(t)) %>%
+  arrange(name, t)
+
+# add labels to shapes
+shapes <- setNames(mod2_nodes$shape, mod2_nodes$name)
+
+# function to calculate the distance of a shapes center to an edge
+dist_to_edge <- function(shape, ux, uy) {
+  ifelse(shape == "circle",
+         r,
+         pmin(hw / pmax(abs(ux), 1e-9), hh / pmax(abs(uy), 1e-9)))
+}
+
+# extract and define DAG edges
+mod2_edges <- mod2_d %>%
+  as_tibble() %>%
+  filter(!is.na(xend)) %>%
+  mutate(
+    len = sqrt((xend - x)^2 + (yend - y)^2),
+    ux  = (xend - x) / len,
+    uy  = (yend - y) / len,
+    d1  = dist_to_edge(unname(shapes[name]), ux, uy),
+    d2  = dist_to_edge(unname(shapes[to]),   ux, uy),
+    x0  = x + ux * d1,      y0 = y + uy * d1,
+    x1  = xend - ux * d2,   y1 = yend - uy * d2
+  )
+
+# plot model 2 DAG
+ggplot() +
+  # draw edges
+  geom_segment(
+    data = mod2_edges, aes(x = x0, y = y0, xend = x1, yend = y1),
+    arrow = arrow(length = unit(3, "mm"), type = "closed"), linewidth = 0.7
+  ) +
+  # draw pink circles
+  geom_polygon(
+    data = circle_poly, aes(x = px, y = py, group = name),
+    fill = "#F4A6C8", color = "#C2185B", linewidth = 0.8
+  ) +
+  # drawblue rectangles
+  geom_rect(
+    data = mod2_rect_nodes,
+    aes(xmin = x - hw, xmax = x + hw, ymin = y - hh, ymax = y + hh),
+    fill = "#6BAED6", color = "black", linewidth = 0.8
+  ) +
+  # add labels
+  geom_text(data = mod2_nodes, aes(x = x, y = y, label = name), size = 3.5) +
+  coord_fixed(xlim = c(-0.6, 4.6), ylim = c(-1.6, 1.6)) +
+  theme_dag()
+```
+# Plot full structural equation models
+```{r sem_diagrams}
+
+# ---------------------------------------------------------------
+# Style (all sizes are in plot "data units"; labels are in mm)
+# ---------------------------------------------------------------
+sem_style <- list(
+  r_lat = 0.55,    # latent circle radius
+  hw = 0.62,       # observed rectangle half-width
+  hh = 0.28,       # observed rectangle half-height
+  r_err = 0.26,    # error / disturbance circle radius
+  err_gap = 0.40,  # gap between a node and its error circle
+  label_size = 2.5,
+  err_label_size = 3.2,
+  col_lat = "#F4A6C8", border_lat = "#C2185B",
+  col_obs = "#6BAED6", border_obs = "black",
+  col_err = "white",   border_err = "grey30",
+  lwd = 0.5,
+  arrow_mm = 2.5
+)
+
+# define ASCI codes for greek letters
+eps  <- "\u03b5"   # indicator error
+zeta <- "\u03b6"   # disturbance of a structural variable
+
+# ---------------------------------------------------------------
+# Helpers to describe a model
+# ---------------------------------------------------------------
+node <- function(name, x, y, type, err_angle = NA_real_, err_label = NA_character_) {
+  tibble(name = name, x = x, y = y, type = type,
+         err_angle = err_angle, err_label = err_label)
+}
+
+# observed nodes stacked in a column, listed top to bottom
+col_of <- function(names, x, yc, gap, ...) {
+  n <- length(names)
+  node(names, x, yc + ((n - 1) / 2 - (seq_len(n) - 1)) * gap, "observed", ...)
+}
+
+# observed nodes in a row, listed left to right
+row_of <- function(names, xc, y, gap, ...) {
+  n <- length(names)
+  node(names, xc + (seq_len(n) - 1 - (n - 1) / 2) * gap, y, "observed", ...)
+}
+
+# straight one-headed arrows: from -> to (vectors are recycled)
+paths <- function(from, to) {
+  tibble(from = from, to = to, type = "path", curve = NA_real_)
+}
+
+# curved two-headed arrows between every pair in `vars`.
+# curve > 0 bows to the LEFT of the first -> second direction, curve < 0 to the right.
+# prefix "e_" draws the arcs between error terms, "" between the variables themselves.
+covs <- function(vars, curve, prefix = "e_") {
+  m <- t(combn(vars, 2))
+  tibble(from = paste0(prefix, m[, 1]), to = paste0(prefix, m[, 2]),
+         type = "cov", curve = curve)
+}
+
+# ---------------------------------------------------------------
+# Drawing engine
+# ---------------------------------------------------------------
+# distance from a node's centre to its boundary in direction th (radians)
+edge_dist <- function(shape, rx, ry, th) {
+  ifelse(shape == "circle", rx,
+         pmin(rx / pmax(abs(cos(th)), 1e-9), ry / pmax(abs(sin(th)), 1e-9)))
+}
+
+outline <- function(d) {
+  d %>%
+    crossing(t = seq(0, 2 * pi, length.out = 100)) %>%
+    mutate(px = x + rx * cos(t), py = y + ry * sin(t)) %>%
+    arrange(name, t)
+}
+
+plot_sem <- function(mod, st = sem_style) {
+  nodes <- mod$nodes %>%
+    mutate(
+      label = name,
+      shape = if_else(type == "latent", "circle", "rect"),
+      rx    = if_else(type == "latent", st$r_lat, st$hw),
+      ry    = if_else(type == "latent", st$r_lat, st$hh)
+    )
+
+  # error / disturbance circles, placed at err_angle degrees from their node
+  errs <- nodes %>%
+    filter(!is.na(err_angle)) %>%
+    mutate(
+      th    = err_angle * pi / 180,
+      reach = edge_dist(shape, rx, ry, th) + st$err_gap + st$r_err,
+      owner = name,
+      name  = paste0("e_", owner),
+      x     = x + reach * cos(th),
+      y     = y + reach * sin(th),
+      type  = "error", shape = "circle", rx = st$r_err, ry = st$r_err,
+      label = err_label
+    )
+
+  cols <- c("name", "x", "y", "type", "shape", "rx", "ry", "label")
+  geom <- bind_rows(select(nodes, all_of(cols)), select(errs, all_of(cols)))
+
+  edges <- bind_rows(
+    mod$edges,
+    errs %>% transmute(from = name, to = owner, type = "path", curve = NA_real_)
+  )
+
+  ga <- geom %>% select(from = name, xa = x, ya = y, sa = shape, rxa = rx, rya = ry)
+  gb <- geom %>% select(to = name,   xb = x, yb = y, sb = shape, rxb = rx, ryb = ry)
+  e  <- edges %>% left_join(ga, by = "from") %>% left_join(gb, by = "to")
+
+  bad <- e %>% filter(is.na(xa) | is.na(xb))
+  if (nrow(bad) > 0) {
+    stop("Unknown node(s) in edges: ",
+         paste(unique(c(bad$from[is.na(bad$xa)], bad$to[is.na(bad$xb)])), collapse = ", "),
+         "\n(Error terms are named e_<node> and exist only if the node has an err_angle.)")
+  }
+
+  # straight arrows, trimmed to each node's boundary
+  straight <- e %>%
+    filter(type == "path") %>%
+    mutate(
+      th = atan2(yb - ya, xb - xa),
+      d1 = edge_dist(sa, rxa, rya, th),
+      d2 = edge_dist(sb, rxb, ryb, th + pi),
+      x0 = xa + cos(th) * d1, y0 = ya + sin(th) * d1,
+      x1 = xb - cos(th) * d2, y1 = yb - sin(th) * d2
+    )
+
+  # curved two-headed arcs (quadratic Bezier), trimmed to node boundaries
+  cv <- e %>% filter(type == "cov")
+  arcs <- bind_rows(lapply(seq_len(nrow(cv)), function(i) {
+    r  <- cv[i, ]
+    dx <- r$xb - r$xa; dy <- r$yb - r$ya; L <- sqrt(dx^2 + dy^2)
+    cx <- (r$xa + r$xb) / 2 - dy / L * r$curve * L
+    cy <- (r$ya + r$yb) / 2 + dx / L * r$curve * L
+    ta <- atan2(cy - r$ya, cx - r$xa)
+    tb <- atan2(cy - r$yb, cx - r$xb)
+    p0x <- r$xa + cos(ta) * edge_dist(r$sa, r$rxa, r$rya, ta)
+    p0y <- r$ya + sin(ta) * edge_dist(r$sa, r$rxa, r$rya, ta)
+    p2x <- r$xb + cos(tb) * edge_dist(r$sb, r$rxb, r$ryb, tb)
+    p2y <- r$yb + sin(tb) * edge_dist(r$sb, r$rxb, r$ryb, tb)
+    t <- seq(0, 1, length.out = 80)
+    tibble(id = i,
+           x = (1 - t)^2 * p0x + 2 * (1 - t) * t * cx + t^2 * p2x,
+           y = (1 - t)^2 * p0y + 2 * (1 - t) * t * cy + t^2 * p2y)
+  }))
+
+  head <- function(ends = "last") {
+    arrow(length = unit(st$arrow_mm, "mm"), type = "closed", ends = ends)
+  }
+
+  ggplot() +
+    geom_segment(data = straight, aes(x = x0, y = y0, xend = x1, yend = y1),
+                 arrow = head(), linewidth = st$lwd) +
+    geom_path(data = arcs, aes(x = x, y = y, group = id),
+              arrow = head("both"), linewidth = st$lwd) +
+    geom_polygon(data = outline(filter(geom, type == "error")),
+                 aes(x = px, y = py, group = name),
+                 fill = st$col_err, color = st$border_err, linewidth = st$lwd) +
+    geom_polygon(data = outline(filter(geom, type == "latent")),
+                 aes(x = px, y = py, group = name),
+                 fill = st$col_lat, color = st$border_lat, linewidth = 0.8) +
+    geom_rect(data = filter(geom, type == "observed"),
+              aes(xmin = x - rx, xmax = x + rx, ymin = y - ry, ymax = y + ry),
+              fill = st$col_obs, color = st$border_obs, linewidth = 0.6) +
+    geom_text(data = filter(geom, type != "error"),
+              aes(x = x, y = y, label = label), size = st$label_size) +
+    geom_text(data = filter(geom, type == "error"),
+              aes(x = x, y = y, label = label), size = st$err_label_size) +
+    coord_fixed(xlim = mod$xlim, ylim = mod$ylim, expand = FALSE) +
+    theme_void()
+}
+
+# ---------------------------------------------------------------
+# Model 1
+# ---------------------------------------------------------------
+pid_ind <- c("DIST", "CONT", "SEST", "SEFF")
+pit_ind <- c("DIST_THRT", "CONT_THRT", "SEST_THRT", "SEFF_THRT")
+
+mod1 <- list(
+  nodes = bind_rows(
+    col_of(pid_ind, x = 0, yc = 0, gap = 1.3, err_angle = 180, err_label = eps),
+    node("PID",   3.0,  0.0, "latent"),
+    node("PIT",   6.5,  2.6, "latent",   err_angle = 270, err_label = zeta),
+    node("DISP", 6.5, -2.6, "observed", err_angle = 90,  err_label = zeta),
+    row_of(pit_ind, xc = 6.5, y = 5.2, gap = 1.6, err_angle = 90, err_label = eps),
+    node("YVAR", 10.2, 0.0, "observed", err_angle = 0, err_label = zeta)
+  ),
+  edges = bind_rows(
+    # loadings (latent -> indicator)
+    paths("PID", pid_ind),
+    paths("PIT", pit_ind),
+    # structural paths
+    paths("PID", c("DISP", "PIT", "YVAR")),
+    paths(c("DISP", "PIT"), "YVAR"),
+    # covariances
+    covs(c("PIT", "DISP"), 0.5),   # DISP ~~ PIT (between disturbances)
+    covs(pid_ind, -0.5),            # among PID indicator errors (bow left)
+    covs(pit_ind, 0.5)              # among PIT indicator errors (bow up)
+  ),
+  xlim = c(-3.2, 12.6), ylim = c(-4.0, 8.2)
+)
+
+# ---------------------------------------------------------------
+# Model 2
+# ---------------------------------------------------------------
+t1_ind <- c("DIST_THRT_T1", "CONT_THRT_T1", "SEST_THRT_T1", "SEFF_THRT_T1")
+t2_ind <- c("DIST_THRT_T2", "CONT_THRT_T2", "SEST_THRT_T2", "SEFF_THRT_T2")
+
+mod2 <- list(
+  nodes = bind_rows(
+    col_of(pid_ind, x = 0, yc = 0, gap = 1.3, err_angle = 180, err_label = eps),
+    node("PID",      3.0,  0.0, "latent"),
+    # time 1
+    node("PIT_T1",   6.5,  2.6, "latent",   err_angle = 270, err_label = zeta),
+    node("DISP_T1", 6.5, -2.6, "observed", err_angle = 90,  err_label = zeta),
+    row_of(t1_ind, xc = 6.5, y = 5.2, gap = 1.6, err_angle = 90, err_label = eps),
+    node("YVAR_T1", 10.2,  0.0, "observed", err_angle = 90,  err_label = zeta),
+    # time 2
+    node("PIT_T2",  13.8,  2.6, "latent",   err_angle = 270, err_label = zeta),
+    node("DISP_T2", 13.8, -2.6, "observed", err_angle = 90,  err_label = zeta),
+    row_of(t2_ind, xc = 13.8, y = 5.2, gap = 1.6, err_angle = 90, err_label = eps),
+    node("YVAR_T2", 17.4,  0.0, "observed", err_angle = 0,   err_label = zeta)
+  ),
+  edges = bind_rows(
+    # loadings
+    paths("PID", pid_ind),
+    paths("PIT_T1", t1_ind),
+    paths("PIT_T2", t2_ind),
+    # time 1 structure
+    paths("PID", c("PIT_T1", "DISP_T1", "YVAR_T1")),
+    paths(c("PIT_T1", "DISP_T1"), "YVAR_T1"),
+    # stability paths
+    paths("PIT_T1", "PIT_T2"),
+    paths("DISP_T1", "DISP_T2"),
+    paths("YVAR_T1", "YVAR_T2"),
+    # time 2 structure
+    paths(c("PIT_T2", "DISP_T2"), "YVAR_T2"),
+    # covariances
+    covs(c("PIT_T1", "DISP_T1"), 0.5),
+    covs(c("PIT_T2", "DISP_T2"), 0.5),
+    covs(pid_ind, -0.5),
+    covs(t1_ind, 0.5),
+    covs(t2_ind, 0.5)
+  ),
+  xlim = c(-3.2, 19.8), ylim = c(-4.0, 8.2)
+)
+
+p1 <- plot_sem(mod1)
+p2 <- plot_sem(mod2)
+
+```

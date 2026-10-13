@@ -1,0 +1,376 @@
+---
+title: "Power_Analysis"
+output: html_document
+---
+# Set up R environment
+```{r setup}
+# load libraries
+library(lavaan)
+library(power4mome)
+library(broom)
+library(rempsyc)
+library(tidyverse)
+library(flextable)
+
+# define seed for reproducibility
+seed <- 23571113
+
+```
+
+# Define model structures
+```{r models}
+# define model structure for moderation models
+mod_model <-
+  "
+  y ~ x1 + w + x1:w + control
+  "
+
+# define model structure for theoretical model one
+model_one <- 
+    "
+  # Regressions
+    fm1 ~ fx
+    m2 ~ fx
+    y ~ fx + fm1 + m2
+  # Variances
+    fm1 ~~ m2
+    "
+
+# define model structure for theoretical model one
+model_two <-
+    "
+  # Regressions
+    fm1 ~ fx
+    m2 ~ fx
+    m3 ~ fx + fm1 + m2
+    fm4 ~ fm1
+    m5 ~ m2
+    y ~ m3 + fm4 + m5
+  # Variances
+    fm1 ~~ m2
+    fm4 ~~ m5
+    "
+```
+
+# Estimate effect sizes and reliability for latent variables
+```{r estimates}
+# estimate effect sizes for moderation models
+mod_model_es <-
+  "
+  .beta.: l
+  y ~ x1: m
+  y ~ w: l
+  y ~ x1:w: .15
+  "
+
+# estimate effect sizes for theoretical model one
+model_one_es <-
+  "
+  fm1 ~ fx: m
+  m2 ~ fx: m
+  y ~ fx: m
+  y ~ fm1: m
+  y ~ m2: m
+  fm1 ~~ m2: m
+  "
+
+# estimate effect sizes for theoretical model two
+model_two_es <-
+  "
+  fm1 ~ fx: m
+  m2 ~ fx: m
+  m3 ~ fx: m
+  m3 ~ fm1: m
+  m3 ~ m2: m
+  fm4 ~ fm1: l
+  m5 ~ m2: l
+  y ~ m3: l
+  y ~ fm4: m
+  y ~ m5: m
+  fm1 ~~ m2: m
+  fm4 ~~ m5: m
+  "
+
+# define how many indicators each latent variable has for model one
+k1 <- c(fx = 3,
+       fm1 = 4)
+
+# define expected reliability for model one latent variables
+model_rel1 <- c(fx = .85,
+               fm1 = .9)
+
+# define how many indicators each latent variable has for model two
+
+k2 <- c(fx = 4,
+        fm1 = 4,
+        fm4 = 4)
+
+# define expectedd reliabilities for model two latent variables
+model_rel2 <- c(fx = .85,
+        fm1 = .9,
+        fm4 = .9)
+
+
+```
+# Check model structure
+```{r model_check}
+
+# Moderation model check
+mod_model_check <-power4test(nrep=2,
+                            model= mod_model,
+                            pop_es = mod_model_es,
+                            n = 50,
+                            iseed = seed)
+mod_model_check
+
+# Theoretical model 1 check
+model_one_check <-power4test(nrep=2,
+                            model= model_one,
+                            pop_es = model_one_es,
+                            number_of_indicators = k1,
+                            reliability = model_rel1,
+                            n = 50,
+                            iseed = seed)
+model_one_check
+
+# Theoretical model 2 check
+model_two_check <- power4test(nrep = 2,
+                  model = model_two,
+                  pop_es = model_two_es,
+                  number_of_indicators = k2,
+                  reliability = model_rel2,
+                  n = 50,
+                  iseed = seed)
+
+model_two_check
+
+```
+# Power Analysis for moderation models
+```{r mod_model}
+# free up locked memory prior to computation
+gc()
+
+# calculate initial simulation for moderation model fit
+mod_model_out <-power4test(nrep=200,
+                            model= mod_model,
+                            pop_es = mod_model_es,
+                            n = 100,
+                            R = 2000,
+                            ci_type = "mc",
+                            fit_model_args = list(fit_function = "lm"),
+                            test_fun = test_moderation,
+                            iseed = seed,
+                            parallel = TRUE)
+mod_model_out
+
+
+
+# recalculate estimate power and effect sizes across the range of possible Ns
+mod_model_out_n <- power4test_by_n(mod_model_out, n = c(300, 310, 320, 330, 340, 350))
+
+# calculate rejection rates for the interaction effect across all sample sizes
+mod_model_rates <- rejection_rates(mod_model_out_n)
+
+# plot power by sample size
+mod_model_rates %>%
+  ggplot(aes(n, reject)) +
+    geom_point() +
+    geom_line() +
+    geom_hline(yintercept = .80, linetype = "dashed", color = c("red")) +
+    annotate("text", x = 301, y = .81, label = "B = .80", color = "red") +
+    coord_cartesian(xlim = c(300, 350), ylim = c(0.5, 0.99)) +
+    theme_classic()
+
+
+# isolate relevant columns and arrange by sample size
+mod_model_rates_out <- mod_model_rates %>%
+  select(n, test, est, reject, reject_ci_lo, reject_ci_hi) %>%
+  arrange(n)
+
+
+# rename collumns to be more legibly
+colnames(mod_model_rates_out) <- c("n","effect","r", "B", "Lower CI", "Upper CI")
+
+# replace test labels with more meaninful labels
+tests <- rep(c("x:w->y"), 6)
+mod_model_rates_out$effect <- tests
+
+# convert dataframe to a nice looking table
+mod_model_stats_table <- nice_table(mod_model_rates_out,
+                          title = c("Table 1", "Estimated power for moderation models"),
+                          note = "Estimates generated using Monte-Carlo simulation with 2000 replications. Estimated r indicates mean effect size across repolications.")
+
+# save table to MS word for easy insertion in manuscript
+flextable::save_as_docx(mod_model_stats_table, path = "./output/nice_table1.docx")
+
+```
+# Power analysis for theoretical model one
+```{r analyze_model_one}
+# free up locked memory prior to computation
+gc()
+
+# simulate initial model with the first in direct path via fm1
+lm1_fit1 <- power4test(nrep=200,
+                            model= model_one,
+                            pop_es = model_one_es,
+                            number_of_indicators = k1,
+                            reliability = model_rel1,
+                            n = 200,
+                            R = 2000,
+                            ci_type = "mc",
+                            test_fun = test_indirect_effect,
+                            test_args = list(
+                              x = "fx",
+                              m = "fm1",
+                              y = "fy",
+                              mc_ci = TRUE
+                            ),
+                            iseed = seed,
+                            parallel = TRUE)
+lm1_fit1
+
+# add second parralel path through m2 to model and re-simulate fit
+lm1_out <- power4test(
+  object = lm1_fit1,
+  test_fun = test_indirect_effect,
+  test_args = list(x = "fx", m = "m2", y = "fy", mc_ci = TRUE),
+  test_name = "fx_m2_fy"
+)
+
+# simulate model across possible sample sizes
+lm1_out_n <- power4test_by_n(lm1_out, n = c(300, 310, 320, 330, 340, 350))
+
+# calculate rejection rates for each path and sample size
+lm1_rates <- rejection_rates(lm1_out_n)
+
+# replace test column with more meaningful path labels
+tests <- rep(c("fx->fm1->fy", "fx->m2->fy"), 6)
+lm1_rates$test <- tests
+
+# plot estimate power by sample size and pathway
+lm1_rates %>%
+  ggplot(aes(n, reject, colour = test)) +
+    geom_point() +
+    geom_line() +
+    geom_hline(yintercept = .80, linetype = "dashed", color = c("red")) +
+    annotate("text", x = 301, y = .81, label = "B = .80", color = "red") +
+    coord_cartesian(xlim = c(300, 350), ylim = c(0.5, 0.99)) +
+    theme_classic()
+
+
+# select important sample sizes, extract important columns, and arrange by sample size
+lm1_rates_out <- lm1_rates %>%
+  filter(n %in% c(300, 310, 320, 330, 340, 350)) %>%
+  select(n, test, est, reject, reject_ci_lo, reject_ci_hi) %>%
+  arrange(n)
+
+# rename columns to be more useful
+colnames(lm1_rates_out) <- c("n", "Path", "r", "B", "Lower CI", "Upper CI")
+
+# convert table to a nice looking data frame
+lm1_stats_table <- nice_table(lm1_rates_out,
+                          title = c("Table 2", "Estimated power for theoretical model 1 by pathway"),
+                          note = "Estimates generated using Monte-Carlo simulation with 2000 replications. Estimated r indicates mean effect size across repolications.")
+
+# save nice table to MS word doc for easy insertion in manuscript
+flextable::save_as_docx(lm1_stats_table, path = "./output/nice_table2.docx")
+
+```
+# Power analysis for theoretical model 2
+```{r analyze_model_2}
+# free up locked memory prior to computation
+gc()
+
+# Simulate initial model fit considering only the simple moderation path by m3
+lm2_single_fit <-power4test(nrep=200,
+                            model= model_two,
+                            pop_es = model_two_es,
+                            number_of_indicators = k2,
+                            reliability = model_rel2,
+                            n = 200,
+                            R = 2000,
+                            ci_type = "mc",
+                            test_fun = test_indirect_effect,
+                            test_args = list(
+                              x = "fx",
+                              m = "m3",
+                              y = "y",
+                              mc_ci = TRUE
+                            ),
+                            iseed = seed,
+                            parallel = TRUE)
+
+# Re-simulate after adding first serial path via fm1 and m3
+lm2_serial1 <- power4test(
+  object = lm2_single_fit,
+  test_fun = test_indirect_effect,
+  test_args = list(x = "fx", m = c("fm1", "m3"), y = "y", mc_ci = TRUE),
+  test_name = "fx_fm1_m3_y"
+)
+
+# Re-simulate after adding second serial path via m2 and m3
+lm2_serial2 <- power4test(
+  object = lm2_serial1,
+  test_fun = test_indirect_effect,
+  test_args = list(x = "fx", m = c("m2", "m3"), y = "y", mc_ci = TRUE),
+  test_name = "fx_m2_m3_y"
+)
+
+# Re-simulate after adding first parallel path via fm1 and fm4
+lm2_sp1 <- power4test(
+  object = lm2_serial2,
+  test_fun = test_indirect_effect,
+  test_args = list(x = "fx", m = c("fm1", "fm4"), y = "y", mc_ci = TRUE),
+  test_name = "fx_fm1_fm4_y"
+)
+
+# Re-simulate after adding second parallel path via m2 and m5
+lm2_full <- power4test(
+  object = lm2_sp1,
+  test_fun = test_indirect_effect,
+  test_args = list(x = "fx", m = c("m2", "m5"), y = "y", mc_ci = TRUE),
+  test_name = "fx_m2_m5_y"
+)
+
+lm2_full
+
+# simualte data across the range of sample sizes
+lm2_out_n <- power4test_by_n(lm2_full, n = c(150, 155, 160, 165, 170, 175))
+
+# calculate rejection rates across possible sample sizes for each indirect path
+lm2_rates <- rejection_rates(lm2_out_n)
+
+
+
+
+ # replace tests column with more meaningful path labels
+tests <- rep(c("fx->m3->y", "fx->fm1->m3->y", "fx->m2->m3->y","fx->fm1->fm4->y","fx->m2->m5->y"), 6)
+lm2_rates$test <- tests
+
+# plot rejection rates for model two by sample size and pathway
+lm2_rates %>%
+  ggplot(aes(n, reject, colour = test)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept = .80, linetype = "dashed", color = c("red")) +
+  annotate("text", x = 151, y = .81, label = "B = .80", color = "red") +
+  coord_cartesian(xlim = c(150, 175), ylim = c(0.5, 0.99)) +
+  theme_classic()
+
+# pull important sample sizes, isolate important collumns, and arrange by sample size
+lm2_rates_out <- lm2_rates %>%
+  filter(n %in% c(150, 165, 175, 200)) %>%
+  select(n, test, est, reject, reject_ci_lo, reject_ci_hi) %>%
+  arrange(n)
+
+# update column names to make table more legible
+colnames(lm2_rates_out) <- c("n", "Path", "r", "B", "Lower CI", "Upper CI")
+
+# convert dataframe to a nice looking table
+lm2_stats_table <- nice_table(lm2_rates_out,
+                          title = c("Table 3", "Estimated power for theoretical model 3 by pathway"),
+                          note = "Estimates generated using Monte-Carlo simulation with 2000 replications. Estimated r indicates mean effect size across repolications.")
+
+# save table to MS word doc for easy insertion into manuscript
+flextable::save_as_docx(lm2_stats_table, path = "./output/nice_table3.docx")
+```
